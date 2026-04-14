@@ -37,7 +37,16 @@ const App = () => {
     Berdasarkan data di atas, apa rekomendasi peran karir IT yang paling cocok (Software Engineer/Data Analyst/UI UX/DS) dan apa satu skill yang paling mendesak untuk ditingkatkan?
     `;
     
-    try {
+    // Model AI yang digunakan
+    const models = [
+      "nvidia/nemotron-3-nano-30b-a3b:free",
+      "arcee-ai/trinity-large-preview:free",
+      "minimax/minimax-m2.5:free"
+    ];
+
+    // Fungsi helper untuk mencoba model secara berurutan jika terjadi error
+    const attemptFetch = async (modelName) => {
+      console.log(`Mencoba menggunakan model: ${modelName}`);
       const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: 'POST',
         headers: {
@@ -45,7 +54,7 @@ const App = () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: "nvidia/nemotron-3-nano-30b-a3b:free",
+          model: modelName,
           messages: [
             { role: "system", content: systemIntructions },
             { role: "user", content: userQuery }
@@ -53,22 +62,36 @@ const App = () => {
         })
       });
 
-      const data = await response.json();
-      console.log("Respon OpenRouter:", data);
-
-      const aiText = data.choices?.[0]?.message?.content;
-
-      if (aiText) {
-        setAiResult(aiText);
-      } else {
-        setAiResult("Analisis selesai: Mahasiswa menunjukkan potensi kuat di bidang teknis, namun perlu menyeimbangkan soft skill untuk jenjang karir senior.");
+      if (!response.ok) {
+        throw new Error(`Model ${modelName} gagal (Status: ${response.status})`);
       }
-    } catch (error) {
-      console.error("Error AI:", error);
-      setAiResult("Koneksi ke AI Engine terputus. Pastikan API Key di file .env sudah benar dan kuota internet tersedia.");
-    } finally {
-      setIsAnalysing(false);
+
+      return await response.json();
+    };
+
+    // Logic Perulangan dengan fallback model
+    let success = false;
+    for (const model of models) {
+      if (success) break;
+
+      try {
+        const data = await attemptFetch(model);
+        const aiText = data.choices?.[0]?.message?.content;
+
+        if (aiText) {
+          setAiResult(aiText);
+          console.log(`Berhasil dengan model: ${model}`);
+          success = true;
+        }
+      } catch (error) {
+        console.warn(error.message);
+        // Jika model terakhir juga gagal, set hasil default
+        if (model === models[models.length - 1]) {
+          setAiResult("Semua AI Engine sedang sibuk. Silakan coba beberapa saat lagi.");
+        }
+      }
     }
+    setIsAnalysing(false);
   };
 
   // Tambahkan ini di dalam komponen App, sebelum return
