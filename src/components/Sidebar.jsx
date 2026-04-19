@@ -22,7 +22,7 @@ const Sidebar = ({ activeTab, setActiveTab }) => {
       </div>
       <nav className="flex flex-col gap-2">
         <NavItem icon={LayoutDashboard} label="Dashboard" id="dashboard" />
-        <NavItem icon={BookOpen} label="Course Mode" id="lms" />
+        <NavItem icon={BookOpen} label="Join Class" id="lms" />
         <NavItem icon={Target} label="Direct Assessment" id="assessment" />
         <NavItem icon={BarChart3} label="Analytics AI" id="analytics" />
       </nav>

@@ -1,128 +1,161 @@
-import React, { useState } from 'react';
-import { db } from './firebase';
-import { collection, addDoc } from 'firebase/firestore';
-import { useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
+import { db, auth } from './firebase'; // Pastikan auth sudah diekspor di firebase.js
+import { onAuthStateChanged } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
+
+// Import Pages
 import Sidebar from './components/Sidebar';
 import Dashboard from './pages/Dashboard';
-import LMS from './pages/LMS';
 import Assessment from './pages/Assessment';
 import Analytics from './pages/Analytics';
-// Import yang lain nanti di sini...
+import SetupProfile from './pages/SetupProfile';
+import Login from './pages/Login'; 
 
 const App = () => {
-  const [aiResult, setAiResult] = useState("");
-  const [isAnalysing, setIsAnalysing] = useState(false); 
+  // --- STATE UTAMA ---
+  const [user, setUser] = useState(null); // Data user dari Firebase (termasuk role & targetJob)
+  const [loading, setLoading] = useState(true); // Status loading saat cek login
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [userStats] = useState({
-    name: "Kelompok SmartLMS",
-    skills: { technical: 35, communication: 30, problemSolving: 40, leadership: 30 },
-  });
+  const [aiResult, setAiResult] = useState("");
+  const [isAnalysing, setIsAnalysing] = useState(false);
 
-  const runAiAnalysis = async() => {
+  // --- 1. MONITOR STATUS LOGIN (AUTH) ---
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (currentUser) {
+        // Jika ada yang login, cari datanya di Firestore
+        const docRef = doc(db, "users", currentUser.uid);
+        const docSnap = await getDoc(docRef);
+
+        if (docSnap.exists()) {
+          // Gabungkan data Auth (email/uid) dengan data Firestore (role/job/skills)
+          setUser({ uid: currentUser.uid, ...docSnap.data() });
+        } else {
+          // Jika login berhasil tapi data di Firestore belum ada (user baru)
+          setUser({ 
+            uid: currentUser.uid, 
+            name: currentUser.displayName || "User Baru", 
+            isNew: true 
+          });
+        }
+      } else {
+        setUser(null); // Tidak ada yang login
+      }
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // --- 2. FUNGSI AI (UPDATE TERBARU) ---
+  const runAiAnalysis = async () => {
+    if (!user || !user.skills) return;
+    
     setIsAnalysing(true);
-    // Ambil API key dari .env
     const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
-    console.log("API Key:", apiKey);
 
-    const systemIntructions = "Anda adalah AI Career Expert dari Smart LMS UNNES. Analisis data mahasiswa dan berikan jawaban dalam Bahasa Indonesia yang profesional. Format jawaban: 1 paragraf analisis kecocokan karir dan 1 poin saran pengembangan diri.";
+    const systemInstructions = "Anda adalah AI Career Expert dari Smart LMS UNNES. Analisis 10 aspek kompetensi mahasiswa sesuai target pekerjaan mereka.";
 
     const userQuery = `
-    Analisis data user berikut:
-    Nama: ${userStats.name}
-    Skor Technical: ${userStats.skills.technical}%
-    Skor Communication: ${userStats.skills.communication}%
-    Skor Problem Solving: ${userStats.skills.problemSolving}%
-    Skor Leadership: ${userStats.skills.leadership}%
-    
-    Berdasarkan data di atas, apa rekomendasi peran karir IT yang paling cocok (Software Engineer/Data Analyst/UI UX/DS) dan apa satu skill yang paling mendesak untuk ditingkatkan?
+      Nama: ${user.name}
+      Target Pekerjaan: ${user.targetJob || "Belum ditentukan"}
+      
+      Skor Aspek:
+      - Technical: ${user.skills.technical}%
+      - Communication: ${user.skills.communication}%
+      - Problem Solving: ${user.skills.problemSolving}%
+      - Leadership: ${user.skills.leadership}%
+      - Teamwork: ${user.skills.teamwork || 0}%
+      - Emotional Intel: ${user.skills.emotionalIntel || 0}%
+      - Digital Literacy: ${user.skills.digitalLiteracy || 0}%
+      - Critical Thinking: ${user.skills.criticalThinking || 0}%
+      - Attention to Detail: ${user.skills.attentionDetail || 0}%
+      - Work Ethic: ${user.skills.workEthic || 0}%
+
+      Berikan analisis kecocokan untuk posisi ${user.targetJob} dan 1 saran perbaikan.
     `;
-    
-    // Model AI yang digunakan
+
     const models = [
       "nvidia/nemotron-3-nano-30b-a3b:free",
       "arcee-ai/trinity-large-preview:free",
       "minimax/minimax-m2.5:free"
     ];
 
-    // Fungsi helper untuk mencoba model secara berurutan jika terjadi error
+    // ... (Fungsi attemptFetch tetap sama seperti sebelumnya)
     const attemptFetch = async (modelName) => {
-      console.log(`Mencoba menggunakan model: ${modelName}`);
-      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: modelName,
-          messages: [
-            { role: "system", content: systemIntructions },
-            { role: "user", content: userQuery }
-          ]
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`Model ${modelName} gagal (Status: ${response.status})`);
-      }
-
-      return await response.json();
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: modelName,
+            messages: [
+              { role: "system", content: systemInstructions },
+              { role: "user", content: userQuery }
+            ]
+          })
+        });
+        if (!response.ok) throw new Error("Gagal");
+        return await response.json();
     };
 
-    // Logic Perulangan dengan fallback model
     let success = false;
     for (const model of models) {
       if (success) break;
-
       try {
         const data = await attemptFetch(model);
         const aiText = data.choices?.[0]?.message?.content;
-
         if (aiText) {
           setAiResult(aiText);
-          console.log(`Berhasil dengan model: ${model}`);
           success = true;
         }
-      } catch (error) {
-        console.warn(error.message);
-        // Jika model terakhir juga gagal, set hasil default
-        if (model === models[models.length - 1]) {
-          setAiResult("Semua AI Engine sedang sibuk. Silakan coba beberapa saat lagi.");
-        }
-      }
+      } catch (e) { console.warn(e.message); }
     }
     setIsAnalysing(false);
   };
 
-  // Tambahkan ini di dalam komponen App, sebelum return
-  useEffect(() => {
-    const testFirebase = async () => {
-      try {
-        const docRef = await addDoc(collection(db, "test"), {
-          pesan: "Halo dari Smart LMS!",
-          waktu: new Date()
-        });
-        console.log("✅ Firebase terhubung! Doc ID:", docRef.id);
-      } catch (error) {
-        console.error("❌ Firebase gagal:", error);
-      }
-    };
+  // --- 3. LOGIKA TAMPILAN (RENDERING) ---
+  
+  // A. Jika masih loading cek login
+  if (loading) return <div className="flex h-screen items-center justify-center">Memuat Smart LMS...</div>;
 
-    testFirebase();
-  }, []);
+  // B. Jika belum login (Nanti kita buat pages/Login.jsx)
+  if (!user) return <Login />;
 
+  // C. Jika user baru (Belum isi data diri/target job)
+  if (user.isNew === true || !user.targetJob) {
+    return <SetupProfile user={user} />;
+  }
+
+  // D. Tampilan Utama (Sudah Login & Punya Data)
   return (
     <div className="flex h-screen bg-slate-50">
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} role={user.role} />
       
       <main className="flex-1 overflow-y-auto p-8">
-        <h2 className="text-2xl font-bold mb-6 capitalize">{activeTab}</h2>
+        <div className="mb-6 flex justify-between items-end">
+          <div>
+            <p className="text-sm text-slate-500 uppercase tracking-wider">Halaman</p>
+            <h2 className="text-3xl font-extrabold capitalize text-slate-800">{activeTab}</h2>
+          </div>
+          <div className="text-right bg-white p-3 rounded-xl shadow-sm border border-slate-100">
+            <p className="font-bold text-slate-700">{user.name}</p>
+            <p className="text-xs text-indigo-600 font-medium">{user.role?.toUpperCase()} | {user.targetJob}</p>
+          </div>
+        </div>
         
-        {activeTab === 'dashboard' && <Dashboard userStats={userStats} runAiAnalysis={runAiAnalysis} />}
-        {activeTab === 'lms' && <LMS />}
-        {activeTab === 'assessment' && <Assessment />}
+        {/* Konten Berdasarkan Tab */}
+        {activeTab === 'dashboard' && 
+          <Dashboard 
+          user={user} 
+          runAiAnalysis={runAiAnalysis} 
+        />}
+        {activeTab === 'assessment' && <Assessment user={user} />}
         {activeTab === 'analytics' && (
           <Analytics 
+            user={user}
             aiResult={aiResult}
             isAnalysing={isAnalysing}
             runAiAnalysis={runAiAnalysis}

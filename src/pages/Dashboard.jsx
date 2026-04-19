@@ -1,13 +1,13 @@
 import React from 'react';
 import { BarChart3, Sparkles, ArrowRight } from 'lucide-react';
 
-const Dashboard = ({ userStats, runAiAnalysis }) => {
+const Dashboard = ({ user, runAiAnalysis }) => {
   return (
     <div className="space-y-6">
       <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm">
         <h3 className="font-bold mb-6 flex items-center gap-2"><BarChart3 size={18}/> Skill Proficiency</h3>
         <div className="space-y-4">
-        {Object.entries(userStats.skills).map(([skill, val], i) => {
+        {Object.entries(user.skills).map(([skill, val], i) => {
             // Array warna agar tiap bar beda warna
             const colors = ['bg-blue-500', 'bg-emerald-500', 'bg-purple-500', 'bg-orange-500'];
             return (
